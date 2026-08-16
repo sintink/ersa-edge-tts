@@ -1,23 +1,44 @@
-from fastapi import FastAPI, Response
-from fastapi.responses import StreamingResponse
+import os
+import asyncio
+import websockets
+import json
 import edge_tts
 
-app = FastAPI()
+PORT = int(os.environ.get("PORT", 8080))
 
-@app.get("/")
-def home():
-    return {"status": "Server Edge TTS Ersa Aktif!"}
+async def text_to_speech(text, output_file="output.mp3"):
+    communicate = edge_tts.Communicate(text, "id-ID-GadisNeural") # Suara wanita natural Indonesia
+    await communicate.save(output_file)
 
-@app.get("/tts")
-async def generate_tts(text: str, voice: str = "id-ID-GadisNeural"):
-    if not text:
-        return Response(content="Teks tidak boleh kosong", status_code=400)
-    
-    communicate = edge_tts.Communicate(text, voice)
-    audio_data = bytearray()
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            audio_data.extend(chunk["data"])
+async def handler(websocket, path):
+    print("ESP32 Berhasil Terhubung!")
+    try:
+        async for message in websocket:
+            data = json.loads(message)
+            user_text = data.get("text", "")
+            print(f"Menerima dari ESP32: {user_text}")
+
+            # Untuk tes awal, AI menjawab otomatis berdasarkan ucapan kamu
+            ai_response = f"Kamu bilang: {user_text}"
             
-    return Response(content=bytes(audio_data), media_type="audio/mpeg")
-  
+            # Ubah teks balasan jadi suara pakai Edge TTS
+            await text_to_speech(ai_response)
+            
+            # Kirim balik ke ESP32
+            await websocket.send(json.dumps({
+                "type": "tts",
+                "text": ai_response,
+                "audio_url": "proses_audio" 
+            }))
+            
+    except websockets.exceptions.ConnectionClosed:
+        print("ESP32 Terputus")
+
+async def main():
+    async with websockets.serve(handler, "0.0.0.0", PORT):
+        print(f"Server WebSocket aktif di port {PORT}")
+        await asyncio.Future()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+    
