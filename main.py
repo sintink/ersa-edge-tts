@@ -1,44 +1,38 @@
-import os
+from fastapi import FastAPI, WebSocket
+import uvicorn
 import asyncio
-import websockets
-import json
 import edge_tts
+import json
+import os
 
+app = FastAPI()
 PORT = int(os.environ.get("PORT", 8080))
 
 async def text_to_speech(text, output_file="output.mp3"):
-    communicate = edge_tts.Communicate(text, "id-ID-GadisNeural") # Suara wanita natural Indonesia
+    communicate = edge_tts.Communicate(text, "id-ID-GadisNeural")
     await communicate.save(output_file)
 
-async def handler(websocket, path):
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
     print("ESP32 Berhasil Terhubung!")
     try:
-        async for message in websocket:
-            data = json.loads(message)
-            user_text = data.get("text", "")
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            user_text = message.get("text", "")
             print(f"Menerima dari ESP32: {user_text}")
 
-            # Untuk tes awal, AI menjawab otomatis berdasarkan ucapan kamu
             ai_response = f"Kamu bilang: {user_text}"
             
-            # Ubah teks balasan jadi suara pakai Edge TTS
-            await text_to_speech(ai_response)
-            
-            # Kirim balik ke ESP32
-            await websocket.send(json.dumps({
+            await websocket.send_json({
                 "type": "tts",
                 "text": ai_response,
-                "audio_url": "proses_audio" 
-            }))
-            
-    except websockets.exceptions.ConnectionClosed:
-        print("ESP32 Terputus")
-
-async def main():
-    async with websockets.serve(handler, "0.0.0.0", PORT):
-        print(f"Server WebSocket aktif di port {PORT}")
-        await asyncio.Future()
+                "audio_url": "proses_audio"
+            })
+    except Exception as e:
+        print(f"Koneksi terputus: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
     
